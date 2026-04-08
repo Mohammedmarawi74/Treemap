@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { LayoutDashboard, Info, Maximize2, Search, ChevronLeft, Activity, Globe, Zap } from 'lucide-react';
-import { motion } from 'motion/react';
+import { LayoutDashboard, Info, Maximize2, Search, ChevronLeft, Activity, Globe, Zap, X, TrendingUp, BarChart3, Filter } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 type RawNode = {
   [key: string]: any;
@@ -18,6 +18,49 @@ interface TreeNode {
   name: string;
   value?: number;
   children?: TreeNode[];
+}
+
+interface CompanyData {
+  name: string;
+  value: number;
+  sector: string;
+  group: string;
+  industry: string;
+  subIndustry: string;
+}
+
+type FilterType = 'all' | 'top10' | 'largest';
+
+// Helper function to flatten all companies
+function flattenCompanies(data: RawNode): CompanyData[] {
+  const companies: CompanyData[] = [];
+  
+  function traverse(obj: any, path: string[] = []) {
+    if (!obj || typeof obj !== 'object') return;
+    
+    const keys = Object.keys(obj).filter(k => k !== '$count');
+    
+    if (keys.length === 0 && obj.$count !== undefined) {
+      companies.push({
+        name: path[path.length - 1] || 'Unknown',
+        value: obj.$count,
+        sector: path[0] || '',
+        group: path[1] || '',
+        industry: path[2] || '',
+        subIndustry: path[3] || ''
+      });
+    } else {
+      keys.forEach(key => {
+        traverse(obj[key], [...path, key]);
+      });
+    }
+  }
+  
+  Object.keys(data).filter(k => k !== '$count').forEach(sector => {
+    traverse(data[sector], [sector]);
+  });
+  
+  return companies;
 }
 
 const MOCK_RAW_DATA: RawNode = {
@@ -484,14 +527,241 @@ const MOCK_RAW_DATA: RawNode = {
   }
 };
 
+// Search and Filter Component
+function SearchAndFilters({
+  companies,
+  onFilterChange,
+  activeFilter
+}: {
+  companies: CompanyData[];
+  onFilterChange: (filtered: CompanyData[], filter: FilterType) => void;
+  activeFilter: FilterType;
+}) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filteredCompanies = useMemo(() => {
+    let filtered = companies;
+
+    // Apply search
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(c =>
+        c.name.toLowerCase().includes(term) ||
+        c.sector.toLowerCase().includes(term) ||
+        c.industry.toLowerCase().includes(term)
+      );
+    }
+
+    // Apply filter
+    if (activeFilter === 'top10') {
+      filtered = [...companies].sort((a, b) => b.value - a.value).slice(0, 10);
+    } else if (activeFilter === 'largest') {
+      filtered = [...companies].sort((a, b) => b.value - a.value).slice(0, 20);
+    }
+
+    return filtered;
+  }, [companies, searchTerm, activeFilter]);
+
+  useEffect(() => {
+    onFilterChange(filteredCompanies, activeFilter);
+  }, [filteredCompanies, activeFilter, onFilterChange]);
+
+  useEffect(() => {
+    if (isExpanded && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isExpanded]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="absolute top-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-10"
+    >
+      {/* Search Bar */}
+      <div className="relative">
+        <div className="flex items-center gap-2 bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700/50 p-3 shadow-2xl">
+          <Search className="w-5 h-5 text-sky-400 flex-shrink-0" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="ابحث عن شركة أو قطاع..."
+            className="flex-1 bg-transparent border-none outline-none text-white placeholder-slate-400 text-sm font-['IBM_Plex_Sans_Arabic']"
+            dir="rtl"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="text-slate-400 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={`p-1.5 rounded-lg transition-all ${
+              isExpanded ? 'bg-sky-500/20 text-sky-400' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Filter className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Expanded Filters */}
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-2 bg-slate-900/95 backdrop-blur-md rounded-xl border border-slate-700/50 overflow-hidden shadow-2xl"
+            >
+              <div className="p-3 space-y-2">
+                <button
+                  onClick={() => onFilterChange(companies, 'all')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-['IBM_Plex_Sans_Arabic'] ${
+                    activeFilter === 'all'
+                      ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                      : 'text-slate-300 hover:bg-slate-800/50 border border-transparent'
+                  }`}
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  <span>عرض الكل ({companies.length} شركة)</span>
+                </button>
+                <button
+                  onClick={() => onFilterChange(
+                    [...companies].sort((a, b) => b.value - a.value).slice(0, 10),
+                    'top10'
+                  )}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-['IBM_Plex_Sans_Arabic'] ${
+                    activeFilter === 'top10'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'text-slate-300 hover:bg-slate-800/50 border border-transparent'
+                  }`}
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  <span>أفضل 10 شركات أداءً</span>
+                </button>
+                <button
+                  onClick={() => onFilterChange(
+                    [...companies].sort((a, b) => b.value - a.value).slice(0, 20),
+                    'largest'
+                  )}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-['IBM_Plex_Sans_Arabic'] ${
+                    activeFilter === 'largest'
+                      ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
+                      : 'text-slate-300 hover:bg-slate-800/50 border border-transparent'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>أكبر 20 شركة (القيمة السوقية)</span>
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Active Filter Badge */}
+      <AnimatePresence>
+        {activeFilter !== 'all' && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="mt-2 flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 rounded-full text-xs text-slate-300 font-['IBM_Plex_Sans_Arabic']"
+          >
+            {activeFilter === 'top10' ? (
+              <>
+                <TrendingUp className="w-3 h-3 text-emerald-400" />
+                <span>أفضل 10 شركات أداءً</span>
+              </>
+            ) : (
+              <>
+                <BarChart3 className="w-3 h-3 text-violet-400" />
+                <span>أكبر 20 شركة</span>
+              </>
+            )}
+            <button
+              onClick={() => onFilterChange(companies, 'all')}
+              className="mr-1 text-slate-400 hover:text-white"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
 export default function App() {
+  const [filteredCompanies, setFilteredCompanies] = useState<CompanyData[] | null>(null);
+  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+  const echartsRef = useRef<any>(null);
+
+  const allCompanies = useMemo(() => flattenCompanies(MOCK_RAW_DATA), []);
+
+  const handleFilterChange = useCallback((companies: CompanyData[], filter: FilterType) => {
+    setFilteredCompanies(companies);
+    setActiveFilter(filter);
+  }, []);
+
+  // Build tree from filtered or all companies
   const data = useMemo(() => {
+    const companies = filteredCompanies || allCompanies;
+    
+    // Build hierarchical tree structure
+    const treeMap: Record<string, any> = {};
+    
+    companies.forEach(company => {
+      const sector = company.sector;
+      const group = company.group;
+      const industry = company.industry;
+      const subIndustry = company.subIndustry;
+      
+      if (!treeMap[sector]) {
+        treeMap[sector] = { $children: {} };
+      }
+      if (group && !treeMap[sector].$children[group]) {
+        treeMap[sector].$children[group] = { $children: {} };
+      }
+      if (industry && !treeMap[sector].$children[group].$children[industry]) {
+        treeMap[sector].$children[group].$children[industry] = { $children: {} };
+      }
+      if (subIndustry && !treeMap[sector].$children[group].$children[industry].$children[subIndustry]) {
+        treeMap[sector].$children[group].$children[industry].$children[subIndustry] = {};
+      }
+      
+      // Assign company to the deepest level
+      const target = subIndustry 
+        ? treeMap[sector].$children[group].$children[industry].$children[subIndustry]
+        : industry 
+          ? treeMap[sector].$children[group].$children[industry]
+          : group 
+            ? treeMap[sector].$children[group]
+            : treeMap[sector];
+      
+      target[company.name] = { $count: company.value };
+    });
+    
     function buildTree(source: any, name: string): any {
       const node: any = { name };
-      
+
       if (source && typeof source === 'object') {
-        const keys = Object.keys(source).filter(k => k !== '$count');
-        if (keys.length > 0) {
+        const keys = Object.keys(source).filter(k => k !== '$children' && k !== '$count');
+        const childrenKeys = Object.keys(source).filter(k => k === '$children');
+        
+        if (childrenKeys.length > 0) {
+          const childObj = source.$children;
+          node.children = Object.keys(childObj)
+            .map(key => buildTree(childObj[key], key))
+            .filter(n => n);
+        } else if (keys.length > 0) {
           node.children = keys.map(key => buildTree(source[key], key));
         } else {
           node.value = source.$count || 100;
@@ -499,14 +769,14 @@ export default function App() {
       } else {
         node.value = source || 100;
       }
-      
+
       return node;
     }
 
-    return Object.keys(MOCK_RAW_DATA)
+    return Object.keys(treeMap)
       .filter(key => key !== '$count')
-      .map(key => buildTree(MOCK_RAW_DATA[key], key));
-  }, []);
+      .map(key => buildTree(treeMap[key], key));
+  }, [filteredCompanies, allCompanies]);
 
   const option = {
     backgroundColor: 'transparent',
@@ -629,13 +899,38 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen h-screen bg-slate-950 overflow-hidden" dir="rtl">
-      <ReactECharts 
-        option={option} 
+    <div className="w-screen h-screen bg-slate-950 overflow-hidden relative" dir="rtl">
+      {/* Search and Filters */}
+      <SearchAndFilters
+        companies={allCompanies}
+        onFilterChange={handleFilterChange}
+        activeFilter={activeFilter}
+      />
+
+      {/* Results Count */}
+      {filteredCompanies && activeFilter !== 'all' && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-slate-800/90 backdrop-blur-md px-4 py-2 rounded-full border border-slate-700/50 text-sm text-slate-300 font-['IBM_Plex_Sans_Arabic'] z-10"
+        >
+          عرض {filteredCompanies.length} شركة
+        </motion.div>
+      )}
+
+      <ReactECharts
+        ref={echartsRef}
+        option={{
+          ...option,
+          series: [{
+            ...option.series[0],
+            data
+          }]
+        }}
         style={{ height: '100%', width: '100%' }}
         opts={{ renderer: 'canvas' }}
       />
-      
+
       {/* Minimalist Floating Hint - subtle and non-intrusive */}
       <div className="absolute bottom-6 right-6 bg-white/5 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 text-[10px] text-white/40 uppercase tracking-widest pointer-events-none">
         انقر للتكبير • استخدم شريط المسار للعودة
