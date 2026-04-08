@@ -1,0 +1,5 @@
+{
+  "name": "ECharts Treemap Explorer",
+  "description": "A visual treemap explorer based on ECharts data statistics, focused on pure visual structure without labels.",
+  "requestFramePermissions": []
+}
